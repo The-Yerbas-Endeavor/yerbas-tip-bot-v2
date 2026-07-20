@@ -51,7 +51,7 @@ export class WalletWorker {
 
       const amount = toUnits(Number(tx.amount).toFixed(8));
       const result = this.ledger.creditDeposit(user.discord_user_id, amount, tx.txid, tx.vout ?? 0);
-      if (result.changes === 1n) {
+      if (result.changes === 1) {
         console.log(`Credited ${fromUnits(amount)} YERB deposit to ${user.discord_user_id}: ${tx.txid}`);
       }
     }
