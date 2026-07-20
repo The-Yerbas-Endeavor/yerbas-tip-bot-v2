@@ -13,15 +13,18 @@ export function toUnits(value) {
 
 export function fromUnits(units) {
   const value = BigInt(units);
-  const whole = value / SCALE;
-  const fraction = (value % SCALE).toString().padStart(8, '0').replace(/0+$/, '');
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  const whole = absolute / SCALE;
+  const fraction = (absolute % SCALE).toString().padStart(8, '0').replace(/0+$/, '');
+  return `${negative ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`;
 }
 
 export class Ledger {
   constructor(databasePath) {
     fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     this.db = new Database(databasePath);
+    this.db.defaultSafeIntegers(true);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.migrate();
@@ -53,11 +56,13 @@ export class Ledger {
         fee_units INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         txid TEXT,
+        error TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(discord_user_id) REFERENCES users(discord_user_id)
       );
       CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger_entries(discord_user_id);
+      CREATE INDEX IF NOT EXISTS idx_users_address ON users(deposit_address);
       CREATE INDEX IF NOT EXISTS idx_withdrawal_status ON withdrawals(status);
     `);
   }
@@ -69,6 +74,10 @@ export class Ledger {
   getUser(userId) {
     this.ensureUser(userId);
     return this.db.prepare('SELECT * FROM users WHERE discord_user_id = ?').get(userId);
+  }
+
+  getUserByAddress(address) {
+    return this.db.prepare('SELECT * FROM users WHERE deposit_address = ?').get(address);
   }
 
   setDepositAddress(userId, address) {
@@ -84,48 +93,68 @@ export class Ledger {
 
   addEntry(userId, amountUnits, type, reference, metadata = null) {
     this.ensureUser(userId);
-    this.db.prepare(`INSERT OR IGNORE INTO ledger_entries(discord_user_id, amount_units, entry_type, reference, metadata)
-      VALUES (?, ?, ?, ?, ?)`).run(userId, Number(amountUnits), type, reference, metadata ? JSON.stringify(metadata) : null);
+    return this.db.prepare(`INSERT OR IGNORE INTO ledger_entries(discord_user_id, amount_units, entry_type, reference, metadata)
+      VALUES (?, ?, ?, ?, ?)`).run(userId, BigInt(amountUnits), type, reference, metadata ? JSON.stringify(metadata) : null);
   }
 
   transfer(fromUserId, toUserId, amountUnits, reference) {
     const amount = BigInt(amountUnits);
     if (amount <= 0n) throw new Error('Transfer amount must be positive');
-    const transaction = this.db.transaction(() => {
+    this.db.transaction(() => {
       this.ensureUser(fromUserId);
       this.ensureUser(toUserId);
       if (this.balanceUnits(fromUserId) < amount) throw new Error('Insufficient balance');
       this.addEntry(fromUserId, -amount, 'tip_debit', reference, { toUserId });
       this.addEntry(toUserId, amount, 'tip_credit', reference, { fromUserId });
-    });
-    transaction();
+    })();
+  }
+
+  creditDeposit(userId, amountUnits, txid, vout = 0) {
+    return this.addEntry(userId, amountUnits, 'deposit', `${txid}:${vout}`, { txid, vout });
   }
 
   createWithdrawal(userId, address, amountUnits, feeUnits) {
     const amount = BigInt(amountUnits);
     const fee = BigInt(feeUnits);
-    const transaction = this.db.transaction(() => {
+    return this.db.transaction(() => {
       this.ensureUser(userId);
       if (this.balanceUnits(userId) < amount + fee) throw new Error('Insufficient balance');
       const result = this.db.prepare(`INSERT INTO withdrawals(discord_user_id, address, amount_units, fee_units)
-        VALUES (?, ?, ?, ?)`).run(userId, address, Number(amount), Number(fee));
+        VALUES (?, ?, ?, ?)`).run(userId, address, amount, fee);
       this.addEntry(userId, -(amount + fee), 'withdrawal_hold', String(result.lastInsertRowid), { address });
       return Number(result.lastInsertRowid);
-    });
-    return transaction();
+    })();
+  }
+
+  claimPendingWithdrawal() {
+    return this.db.transaction(() => {
+      const row = this.db.prepare("SELECT * FROM withdrawals WHERE status='pending' ORDER BY id LIMIT 1").get();
+      if (!row) return null;
+      const changed = this.db.prepare("UPDATE withdrawals SET status='processing', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'").run(row.id);
+      return changed.changes === 1n ? row : null;
+    })();
   }
 
   markWithdrawalSent(id, txid) {
-    this.db.prepare(`UPDATE withdrawals SET status='sent', txid=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).run(txid, id);
+    this.db.prepare("UPDATE withdrawals SET status='sent', txid=?, error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='processing'").run(txid, id);
+  }
+
+  markWithdrawalFailed(id, error) {
+    this.db.transaction(() => {
+      const row = this.db.prepare('SELECT * FROM withdrawals WHERE id=?').get(id);
+      if (!row || row.status !== 'processing') return;
+      this.db.prepare("UPDATE withdrawals SET status='failed', error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(String(error).slice(0, 1000), id);
+      this.addEntry(row.discord_user_id, row.amount_units + row.fee_units, 'withdrawal_refund', String(id), { reason: String(error) });
+    })();
   }
 
   pendingWithdrawals() {
-    return this.db.prepare("SELECT * FROM withdrawals WHERE status='pending' ORDER BY id").all();
+    return this.db.prepare("SELECT * FROM withdrawals WHERE status IN ('pending','processing') ORDER BY id").all();
   }
 
   history(userId, limit = 10) {
     return this.db.prepare(`SELECT amount_units, entry_type, reference, created_at FROM ledger_entries
-      WHERE discord_user_id=? ORDER BY id DESC LIMIT ?`).all(userId, limit);
+      WHERE discord_user_id=? ORDER BY id DESC LIMIT ?`).all(userId, BigInt(limit));
   }
 
   close() { this.db.close(); }
