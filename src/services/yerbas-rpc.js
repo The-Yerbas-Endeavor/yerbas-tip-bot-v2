@@ -45,4 +45,18 @@ export class YerbasRpc {
   getNewAddress(label) { return this.call('getnewaddress', [label]); }
   listTransactions(label = '*', count = 1000, skip = 0) { return this.call('listtransactions', [label, count, skip, true]); }
   sendToAddress(address, amount, comment = '') { return this.call('sendtoaddress', [address, amount, comment]); }
+
+  getAssetData(assetName) { return this.call('getassetdata', [assetName]); }
+  listMyAssets(filter = '*', verbose = false, count = 500, start = 0) {
+    return this.call('listmyassets', [filter, verbose, count, start]);
+  }
+  listAssetBalancesByAddress(address, onlyTotal = false, count = 500, start = 0) {
+    return this.call('listassetbalancesbyaddress', [address, onlyTotal, count, start]);
+  }
+  transferAsset(assetName, amount, address, message = '', expireTime = 0, yerbChangeAddress = '', assetChangeAddress = '') {
+    return this.call('transfer', [assetName, amount, address, message, expireTime, yerbChangeAddress, assetChangeAddress]);
+  }
+  transferAssetFromAddress(assetName, fromAddress, amount, address, message = '', expireTime = 0, yerbChangeAddress = '', assetChangeAddress = '') {
+    return this.call('transferfromaddress', [assetName, fromAddress, amount, address, message, expireTime, yerbChangeAddress, assetChangeAddress]);
+  }
 }

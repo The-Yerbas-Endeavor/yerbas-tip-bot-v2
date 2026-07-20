@@ -43,6 +43,8 @@ export function loadConfig(env = process.env) {
     minimumWithdrawal: numberValue(env, 'MINIMUM_WITHDRAWAL_YERB', 1),
     withdrawalFee: numberValue(env, 'WITHDRAWAL_FEE_YERB', 0.01),
     walletEnabled: booleanValue(env, 'WALLET_ENABLED', false),
-    withdrawalsEnabled: booleanValue(env, 'WITHDRAWALS_ENABLED', false)
+    withdrawalsEnabled: booleanValue(env, 'WITHDRAWALS_ENABLED', false),
+    assetsEnabled: booleanValue(env, 'ASSETS_ENABLED', false),
+    assetWithdrawalsEnabled: booleanValue(env, 'ASSET_WITHDRAWALS_ENABLED', false)
   });
 }

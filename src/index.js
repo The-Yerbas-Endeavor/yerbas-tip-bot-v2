@@ -7,14 +7,16 @@ import {
 import { buildCommands } from './commands.js';
 import { loadConfig } from './config.js';
 import { Ledger } from './services/ledger.js';
+import { AssetLedger } from './services/asset-ledger.js';
 import { YerbasRpc } from './services/yerbas-rpc.js';
 import { WalletWorker } from './services/wallet-worker.js';
 
 const config = loadConfig();
 const ledger = new Ledger(config.databasePath);
+const assetLedger = new AssetLedger(config.databasePath);
 const rpc = new YerbasRpc(config.rpc);
-const walletWorker = new WalletWorker({ config, ledger, rpc });
-const commands = buildCommands({ config, ledger, rpc });
+const walletWorker = new WalletWorker({ config, ledger, assetLedger, rpc });
+const commands = buildCommands({ config, ledger, assetLedger, rpc });
 const commandMap = new Map(commands.map((command) => [command.data.name, command]));
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -27,6 +29,8 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Yerbas Tip Bot v2 connected as ${readyClient.user.tag}`);
   console.log(`Wallet features: ${config.walletEnabled ? 'enabled' : 'disabled'}`);
   console.log(`Withdrawals: ${config.withdrawalsEnabled ? 'enabled' : 'disabled'}`);
+  console.log(`Assets: ${config.assetsEnabled ? 'enabled' : 'disabled'}`);
+  console.log(`Asset withdrawals: ${config.assetWithdrawalsEnabled ? 'enabled' : 'disabled'}`);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -57,6 +61,7 @@ async function shutdown(signal) {
   console.log(`Received ${signal}; shutting down.`);
   walletWorker.stop();
   client.destroy();
+  assetLedger.close();
   ledger.close();
   process.exit(0);
 }
@@ -67,6 +72,7 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 client.login(config.discordToken).catch((error) => {
   console.error('Discord login failed:', error);
   walletWorker.stop();
+  assetLedger.close();
   ledger.close();
   process.exit(1);
 });
