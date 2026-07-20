@@ -1,6 +1,7 @@
 import { ActivityType, Client, Events, GatewayIntentBits } from 'discord.js';
 import { buildCommands } from './commands.js';
 import { loadConfig } from './config.js';
+import './services/mysql-ledger-admin.js';
 import { MySqlLedger } from './services/mysql-ledger.js';
 import { YerbasRpc } from './services/yerbas-rpc.js';
 import { WalletWorker } from './services/wallet-worker.js';
@@ -18,10 +19,7 @@ const commandMap = new Map(commands.map((command) => [command.data.name, command
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, (readyClient) => {
-  readyClient.user.setPresence({
-    activities: [{ name: config.botStatus, type: ActivityType.Watching }],
-    status: 'online'
-  });
+  readyClient.user.setPresence({ activities: [{ name: config.botStatus, type: ActivityType.Watching }], status: 'online' });
   walletWorker.start();
   console.log(`Yerbas Tip Bot v2 connected as ${readyClient.user.tag}`);
   console.log(`Wallet: ${config.walletEnabled ? 'enabled' : 'disabled'}; withdrawals: ${config.withdrawalsEnabled ? 'enabled' : 'disabled'}`);
@@ -56,7 +54,6 @@ async function shutdown(signal) {
 
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
-
 client.login(config.discordToken).catch(async (error) => {
   console.error('Discord login failed:', error);
   walletWorker.stop();
