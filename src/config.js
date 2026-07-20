@@ -18,9 +18,7 @@ function booleanValue(env, key, fallback = false) {
 
 export function loadConfig(env = process.env) {
   const missing = required.filter((key) => !env[key]?.trim());
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
+  if (missing.length > 0) throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
 
   return Object.freeze({
     nodeEnv: env.NODE_ENV ?? 'development',
@@ -31,7 +29,14 @@ export function loadConfig(env = process.env) {
     adminRoleId: env.ADMIN_ROLE_ID?.trim() || null,
     botStatus: env.BOT_STATUS?.trim() || 'Yerbas Tip Bot v2',
     logLevel: env.LOG_LEVEL?.trim() || 'info',
-    databasePath: env.DATABASE_PATH?.trim() || './data/yerbas-tip-bot.sqlite',
+    mysql: Object.freeze({
+      host: env.MYSQL_HOST?.trim() || '127.0.0.1',
+      port: numberValue(env, 'MYSQL_PORT', 3306),
+      user: env.MYSQL_USER?.trim() || '',
+      password: env.MYSQL_PASSWORD ?? '',
+      database: env.MYSQL_DATABASE?.trim() || '',
+      connectionLimit: numberValue(env, 'MYSQL_CONNECTION_LIMIT', 10)
+    }),
     rpc: Object.freeze({
       url: env.YERBAS_RPC_URL?.trim() || 'http://127.0.0.1:9998',
       username: env.YERBAS_RPC_USER?.trim() || '',
