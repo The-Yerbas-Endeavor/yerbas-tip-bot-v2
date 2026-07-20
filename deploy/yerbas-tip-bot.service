@@ -1,0 +1,23 @@
+[Unit]
+Description=Yerbas Tip Bot v2
+After=network-online.target yerbasd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yerbas-tip-bot
+Group=yerbas-tip-bot
+WorkingDirectory=/opt/yerbas-tip-bot-v2
+EnvironmentFile=/etc/yerbas-tip-bot-v2.env
+ExecStart=/usr/bin/node /opt/yerbas-tip-bot-v2/src/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/yerbas-tip-bot-v2/data
+
+[Install]
+WantedBy=multi-user.target
