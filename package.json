@@ -1,0 +1,28 @@
+{
+  "name": "yerbas-tip-bot-v2",
+  "version": "2.0.0-alpha.1",
+  "description": "Official Discord wallet and community tipping bot for Yerbas (YERB).",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "register-commands": "node scripts/register-commands.js",
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check scripts/register-commands.js"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0",
+    "dotenv": "^16.6.1"
+  },
+  "devDependencies": {},
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/The-Yerbas-Endeavor/yerbas-tip-bot-v2.git"
+  }
+}
