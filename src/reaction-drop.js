@@ -5,6 +5,7 @@ const DEFAULT_EMOJI = '🌿';
 const DEFAULT_ACTIVITY_MINUTES = 30;
 const DEFAULT_DROP_DURATION = 60;
 const MAX_MESSAGE_LENGTH = 200;
+const MAX_PUBLIC_MENTIONS = 25;
 
 function amountString(units) { return fromUnits(BigInt(units)); }
 function clean(value, max = MAX_MESSAGE_LENGTH) {
@@ -19,6 +20,18 @@ function shuffle(values) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+async function notifyRecipients(channel, recipients, label = 'Recipients') {
+  const unique = [...new Map(recipients.map((user) => [String(user.id), user])).values()];
+  if (!unique.length) return;
+  const shown = unique.slice(0, MAX_PUBLIC_MENTIONS);
+  const remaining = unique.length - shown.length;
+  const mentions = shown.map((user) => `<@${user.id}>`).join(' ');
+  await channel.send({
+    content: [`🌿 **${label}:**`, mentions, remaining > 0 ? `…and **${remaining} more**.` : null].filter(Boolean).join('\n'),
+    allowedMentions: { parse: [], users: shown.map((user) => String(user.id)) }
+  });
 }
 
 async function databaseUsers(ledger, creatorId) {
@@ -64,7 +77,7 @@ async function validateAmount(interaction, ctx) {
 async function distribute({ ledger, creator, participants, amountUnits, assetName, reference, paymentType }) {
   const unique = [...new Map(participants.map((user) => [String(user.id), user])).values()]
     .filter((user) => !user.bot && String(user.id) !== creator.id);
-  if (!unique.length) return { participantCount: 0, paidUnits: 0n };
+  if (!unique.length) return { participantCount: 0, paidUnits: 0n, recipients: [] };
 
   const count = BigInt(unique.length);
   const baseShare = amountUnits / count;
@@ -81,7 +94,7 @@ async function distribute({ ledger, creator, participants, amountUnits, assetNam
     );
     if (processed.affectedRows !== 1) {
       await connection.rollback();
-      return { participantCount: 0, paidUnits: 0n, duplicate: true };
+      return { participantCount: 0, paidUnits: 0n, duplicate: true, recipients: [] };
     }
 
     await connection.execute(
@@ -144,7 +157,7 @@ async function distribute({ ledger, creator, participants, amountUnits, assetNam
     }
 
     await connection.commit();
-    return { participantCount: unique.length, paidUnits, shareUnits: baseShare };
+    return { participantCount: unique.length, paidUnits, shareUnits: baseShare, recipients: unique };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -177,6 +190,7 @@ async function runImmediate(interaction, ctx, participants, payout, label, payme
     ].filter(Boolean).join('\n'),
     allowedMentions: { parse: [], users: [interaction.user.id] }
   });
+  await notifyRecipients(interaction.channel, result.recipients);
 }
 
 async function startDrop(interaction, ctx, payout, mode) {
@@ -257,6 +271,7 @@ async function startDrop(interaction, ctx, payout, mode) {
       }
       const luckyText = mode === 'lucky' ? ` The winning number was **${targetNumber}**.` : '';
       await message.reply(`🌿 Drop complete! **${fromUnits(result.paidUnits)} ${symbol}** was shared among **${result.participantCount} winner(s)**.${luckyText}`);
+      await notifyRecipients(interaction.channel, result.recipients, 'Winners');
     } catch (error) {
       console.error(`Drop ${interaction.id} failed:`, error);
       await message.reply(`Drop canceled: ${error.message || 'unexpected payout error'}`);
