@@ -7,7 +7,19 @@ const config = loadConfig();
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
 const context = { config, ledger: null, rpc: null };
 const commands = [...buildCommands(context), buildReactionDropCommand(context)];
-const body = commands.map((command) => command.data.toJSON());
+
+function normalizeOptionOrder(options = []) {
+  return options.map((option) => ({
+    ...option,
+    options: option.options ? normalizeOptionOrder(option.options) : undefined
+  })).sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)));
+}
+
+const body = commands.map((command) => {
+  const json = command.data.toJSON();
+  if (json.options) json.options = normalizeOptionOrder(json.options);
+  return json;
+});
 
 try {
   // Direct-message commands must be global. Guild-scoped commands are never
