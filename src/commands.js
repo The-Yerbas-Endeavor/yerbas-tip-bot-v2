@@ -222,12 +222,17 @@ export function buildCommands(ctx) {
       data: inGuildAndDm(new SlashCommandBuilder().setName('help').setDescription('Show available bot commands.')),
       async execute(interaction) {
         await interaction.reply({ content: [
-          '**Yerbas Tip Bot v2 — MySQL drop-in**',
-          '`/deposit`, `/balance`, `/withdraw`, `/history` — available here and in server channels',
-          '`/tip` — server-only public YERB tip',
-          '`/asset-balance`, `/asset-withdraw` — available here and in server channels',
-          '`/asset-tip` — server-only public asset tip',
-          '`/network`, `/ping`, `/version` — status',
+          '**Yerbas Tip Bot v2**',
+          '`/deposit`, `/balance`, `/withdraw`, `/history` — wallet commands available in DMs and server channels',
+          '`/tip` — public server-only YERB tip',
+          '`/asset-balance`, `/asset-withdraw` — asset wallet commands available in DMs and server channels',
+          '`/asset-tip` — public server-only Yerbas Asset tip',
+          '`/rain all` — split YERB or an asset among registered database members',
+          '`/rain online` — split among members currently online, idle, or do-not-disturb',
+          '`/rain active` — split among members recently active in the channel',
+          '`/rain drop` — reaction, phrase, lottery, trivia, or lucky-number drop with optional multiple winners',
+          'Add the optional `asset` field to rain commands to distribute a Yerbas Asset instead of YERB.',
+          '`/network`, `/ping`, `/version` — status commands',
           'Administrator commands are server-only.'
         ].join('\n'), ephemeral: true });
       }
