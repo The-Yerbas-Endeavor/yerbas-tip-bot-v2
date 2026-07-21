@@ -139,18 +139,20 @@ async function runImmediateRain(interaction, ctx, participants, amountUnits, lab
 
 async function startDrop(interaction, ctx, amountUnits, durationSeconds, claimMode, phrase, customMessage) {
   const endsAt = Math.floor(Date.now() / 1000) + durationSeconds;
-  const normalizedPhrase = normalizeText(phrase, 50)?.toLowerCase();
+  const displayPhrase = normalizeText(phrase, 50);
+  const normalizedPhrase = displayPhrase?.toLowerCase();
   if (claimMode === 'phrase' && !normalizedPhrase) throw new Error('A claim phrase is required for phrase mode');
 
   const instructions = claimMode === 'phrase'
-    ? `Type **${normalizeText(phrase, 50)}** in this channel before <t:${endsAt}:R> to enter.`
+    ? `Type **${displayPhrase}** in this channel before <t:${endsAt}:R> to enter.`
     : `React with ${RAIN_EMOJI} before <t:${endsAt}:R> to enter.`;
 
+  const rainMessage = normalizeText(customMessage);
   const message = await interaction.reply({
     content: [
       '🌧️ **YERB Rain Drop!** 🌿',
       `${interaction.user} is dropping **${fromUnits(amountUnits)} YERB**!`,
-      normalizeText(customMessage) ? `> ${normalizeText(customMessage)}` : null,
+      rainMessage ? `> ${rainMessage}` : null,
       instructions,
       'The total will be split evenly among valid claimants.'
     ].filter(Boolean).join('\n'),
@@ -200,10 +202,18 @@ async function startDrop(interaction, ctx, amountUnits, durationSeconds, claimMo
   });
 }
 
-function addCommonOptions(subcommand) {
-  return subcommand
-    .addStringOption((option) => option.setName('amount').setDescription('Total YERB to distribute').setRequired(true))
-    .addStringOption((option) => option.setName('message').setDescription('Optional message shown with the rain').setMaxLength(MAX_RAIN_MESSAGE_LENGTH));
+function addAmountOption(subcommand) {
+  return subcommand.addStringOption((option) => option
+    .setName('amount')
+    .setDescription('Total YERB to distribute')
+    .setRequired(true));
+}
+
+function addMessageOption(subcommand) {
+  return subcommand.addStringOption((option) => option
+    .setName('message')
+    .setDescription('Optional message shown with the rain')
+    .setMaxLength(MAX_RAIN_MESSAGE_LENGTH));
 }
 
 export function buildReactionDropCommand(ctx) {
@@ -212,20 +222,20 @@ export function buildReactionDropCommand(ctx) {
       .setName('rain')
       .setDescription('Distribute YERB using several rain modes.')
       .setContexts(InteractionContextType.Guild)
-      .addSubcommand((subcommand) => addCommonOptions(subcommand
+      .addSubcommand((subcommand) => addMessageOption(addAmountOption(subcommand
         .setName('all')
-        .setDescription('Split YERB among every user in the bot database.')))
-      .addSubcommand((subcommand) => addCommonOptions(subcommand
+        .setDescription('Split YERB among every user in the bot database.'))))
+      .addSubcommand((subcommand) => addMessageOption(addAmountOption(subcommand
         .setName('online')
-        .setDescription('Split YERB among recently active channel users.')
+        .setDescription('Split YERB among recently active channel users.'))
         .addIntegerOption((option) => option
           .setName('activity-minutes')
           .setDescription('How recently users must have chatted (default: 30)')
           .setMinValue(1)
           .setMaxValue(1440))))
-      .addSubcommand((subcommand) => addCommonOptions(subcommand
+      .addSubcommand((subcommand) => addMessageOption(addAmountOption(subcommand
         .setName('drop')
-        .setDescription('Open a timed reaction or phrase claim drop.')
+        .setDescription('Open a timed reaction or phrase claim drop.'))
         .addIntegerOption((option) => option
           .setName('duration')
           .setDescription('Seconds to accept claims (default: 60)')
