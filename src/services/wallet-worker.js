@@ -1,5 +1,16 @@
 import { toUnits, fromUnits } from './ledger.js';
 
+function transactionAssetName(tx) {
+  const value = tx.asset_name ?? tx.assetName ?? tx.asset;
+  return value ? String(value).trim() : null;
+}
+
+function transactionAmount(tx, isAsset) {
+  const value = isAsset ? (tx.asset_amount ?? tx.assetAmount ?? tx.amount) : tx.amount;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
 export class WalletWorker {
   constructor({ config, ledger, rpc, intervalMs = 30000 }) {
     this.config = config;
@@ -39,11 +50,40 @@ export class WalletWorker {
     for (const tx of transactions) {
       if (tx.category !== 'receive') continue;
       if ((tx.confirmations ?? 0) < this.config.confirmations) continue;
-      if (!tx.address || !tx.txid || Number(tx.amount) <= 0) continue;
+      if (!tx.address || !tx.txid) continue;
+
       const user = await this.ledger.getUserByAddress(tx.address);
       if (!user) continue;
-      const amount = toUnits(Number(tx.amount).toFixed(8));
-      const result = await this.ledger.creditDeposit(user.discord_id, amount, tx.txid, tx.vout ?? 0);
+
+      const assetName = transactionAssetName(tx);
+      const amountValue = transactionAmount(tx, Boolean(assetName));
+      if (amountValue === null) continue;
+      const amount = toUnits(amountValue.toFixed(8));
+      const vout = tx.vout ?? 0;
+
+      if (assetName) {
+        if (!this.config.assetsEnabled) continue;
+        const reference = `${tx.txid}:${vout}`;
+        const result = await this.ledger.addAssetCredit(
+          user.discord_id,
+          assetName,
+          amount,
+          'asset_deposit',
+          reference,
+          {
+            txid: tx.txid,
+            vout,
+            address: tx.address,
+            confirmations: tx.confirmations ?? 0
+          }
+        );
+        if (result.changes === 1n) {
+          console.log(`Credited ${fromUnits(amount)} ${assetName} to ${user.discord_id}: ${reference}`);
+        }
+        continue;
+      }
+
+      const result = await this.ledger.creditDeposit(user.discord_id, amount, tx.txid, vout);
       if (result.changes === 1n) console.log(`Credited ${fromUnits(amount)} YERB to ${user.discord_id}: ${tx.txid}`);
     }
   }
