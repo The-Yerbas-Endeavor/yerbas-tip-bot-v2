@@ -22,19 +22,21 @@ const body = commands.map((command) => {
 });
 
 try {
-  // Direct-message commands must be global. Guild-scoped commands are never
-  // available in a bot DM, even when their command contexts include BotDM.
+  // Keep global commands for direct-message support.
   await rest.put(Routes.applicationCommands(config.discordClientId), { body });
   console.log(`Registered ${body.length} global commands with DM contexts.`);
 
-  // Remove stale guild-scoped copies to avoid duplicate command entries after
-  // switching an existing installation from guild registration to global.
+  // Also register the same command set directly in the configured server.
+  // Guild registrations update immediately and avoid waiting for Discord's
+  // global command cache to refresh after adding commands such as /rain.
   if (config.discordGuildId) {
     await rest.put(
       Routes.applicationGuildCommands(config.discordClientId, config.discordGuildId),
-      { body: [] }
+      { body }
     );
-    console.log(`Removed stale guild commands for ${config.discordGuildId}.`);
+    console.log(`Registered ${body.length} guild commands for ${config.discordGuildId}.`);
+  } else {
+    console.warn('DISCORD_GUILD_ID is not configured; only global commands were registered.');
   }
 } catch (error) {
   console.error('Slash-command registration failed:', error);
