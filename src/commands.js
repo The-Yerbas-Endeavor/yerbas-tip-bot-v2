@@ -1,6 +1,21 @@
-import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import {
+  InteractionContextType,
+  PermissionFlagsBits,
+  SlashCommandBuilder
+} from 'discord.js';
 import packageJson from '../package.json' with { type: 'json' };
 import { fromUnits, toUnits } from './services/ledger.js';
+
+const GUILD_AND_DM = [InteractionContextType.Guild, InteractionContextType.BotDM];
+const GUILD_ONLY = [InteractionContextType.Guild];
+
+function inGuildAndDm(builder) {
+  return builder.setContexts(...GUILD_AND_DM);
+}
+
+function guildOnly(builder) {
+  return builder.setContexts(...GUILD_ONLY);
+}
 
 function requireWallet(ctx) {
   if (!ctx.config.walletEnabled) throw new Error('Wallet features are disabled by WALLET_ENABLED=false');
@@ -12,6 +27,7 @@ function requireAssets(ctx) {
 }
 
 function requireAdmin(interaction, ctx) {
+  if (!interaction.inGuild()) throw new Error('Administrator commands can only be used in a server');
   if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return;
   if (ctx.config.adminRoleId && interaction.member?.roles?.cache?.has(ctx.config.adminRoleId)) return;
   throw new Error('Administrator permission required');
@@ -30,22 +46,22 @@ async function validatedAssetAmount(ctx, assetName, amountText) {
 export function buildCommands(ctx) {
   return [
     {
-      data: new SlashCommandBuilder().setName('ping').setDescription('Check whether the bot is online.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('ping').setDescription('Check whether the bot is online.')),
       async execute(interaction) { await interaction.reply({ content: `Pong! ${interaction.client.ws.ping}ms`, ephemeral: true }); }
     },
     {
-      data: new SlashCommandBuilder().setName('version').setDescription('Show bot version information.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('version').setDescription('Show bot version information.')),
       async execute(interaction) { await interaction.reply({ content: `Yerbas Tip Bot ${packageJson.version}\nNode.js ${process.version}`, ephemeral: true }); }
     },
     {
-      data: new SlashCommandBuilder().setName('network').setDescription('Show Yerbas network status.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('network').setDescription('Show Yerbas network status.')),
       async execute(interaction) {
         const [height, info] = await Promise.all([ctx.rpc.getBlockCount(), ctx.rpc.getNetworkInfo()]);
         await interaction.reply(`**Yerbas Network**\nBlock: ${height}\nConnections: ${info.connections ?? 'unknown'}\nProtocol: ${info.protocolversion ?? 'unknown'}`);
       }
     },
     {
-      data: new SlashCommandBuilder().setName('deposit').setDescription('Get your existing or new Yerbas deposit address.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('deposit').setDescription('Get your existing or new Yerbas deposit address.')),
       async execute(interaction) {
         requireWallet(ctx);
         const user = await ctx.ledger.getUser(interaction.user.id, interaction.user.username);
@@ -58,7 +74,7 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('balance').setDescription('Show your legacy MySQL YERB balance.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('balance').setDescription('Show your legacy MySQL YERB balance.')),
       async execute(interaction) {
         requireWallet(ctx);
         const balance = await ctx.ledger.balanceUnits(interaction.user.id, interaction.user.username);
@@ -66,9 +82,9 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('tip').setDescription('Tip YERB to another Discord member.')
+      data: guildOnly(new SlashCommandBuilder().setName('tip').setDescription('Tip YERB to another Discord member.')
         .addUserOption((o) => o.setName('user').setDescription('Recipient').setRequired(true))
-        .addStringOption((o) => o.setName('amount').setDescription('Amount in YERB').setRequired(true)),
+        .addStringOption((o) => o.setName('amount').setDescription('Amount in YERB').setRequired(true))),
       async execute(interaction) {
         requireWallet(ctx);
         const recipient = interaction.options.getUser('user', true);
@@ -83,9 +99,9 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw YERB to an external address.')
+      data: inGuildAndDm(new SlashCommandBuilder().setName('withdraw').setDescription('Withdraw YERB to an external address.')
         .addStringOption((o) => o.setName('address').setDescription('Yerbas address').setRequired(true))
-        .addStringOption((o) => o.setName('amount').setDescription('Amount in YERB').setRequired(true)),
+        .addStringOption((o) => o.setName('amount').setDescription('Amount in YERB').setRequired(true))),
       async execute(interaction) {
         requireWallet(ctx);
         if (!ctx.config.withdrawalsEnabled) throw new Error('Withdrawals are currently disabled');
@@ -99,8 +115,8 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('asset-balance').setDescription('Show your Yerbas Asset balances.')
-        .addStringOption((o) => o.setName('asset').setDescription('Optional asset name')),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('asset-balance').setDescription('Show your Yerbas Asset balances.')
+        .addStringOption((o) => o.setName('asset').setDescription('Optional asset name'))),
       async execute(interaction) {
         requireAssets(ctx);
         const asset = interaction.options.getString('asset')?.trim();
@@ -115,10 +131,10 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('asset-tip').setDescription('Tip a Yerbas Asset to another Discord member.')
+      data: guildOnly(new SlashCommandBuilder().setName('asset-tip').setDescription('Tip a Yerbas Asset to another Discord member.')
         .addUserOption((o) => o.setName('user').setDescription('Recipient').setRequired(true))
         .addStringOption((o) => o.setName('asset').setDescription('Asset name').setRequired(true))
-        .addStringOption((o) => o.setName('amount').setDescription('Asset amount').setRequired(true)),
+        .addStringOption((o) => o.setName('amount').setDescription('Asset amount').setRequired(true))),
       async execute(interaction) {
         requireAssets(ctx);
         const recipient = interaction.options.getUser('user', true);
@@ -130,10 +146,10 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('asset-withdraw').setDescription('Send a Yerbas Asset to an external address.')
+      data: inGuildAndDm(new SlashCommandBuilder().setName('asset-withdraw').setDescription('Send a Yerbas Asset to an external address.')
         .addStringOption((o) => o.setName('asset').setDescription('Asset name').setRequired(true))
         .addStringOption((o) => o.setName('address').setDescription('Yerbas address').setRequired(true))
-        .addStringOption((o) => o.setName('amount').setDescription('Asset amount').setRequired(true)),
+        .addStringOption((o) => o.setName('amount').setDescription('Asset amount').setRequired(true))),
       async execute(interaction) {
         requireAssets(ctx);
         if (!ctx.config.assetWithdrawalsEnabled) throw new Error('Asset withdrawals are currently disabled');
@@ -147,9 +163,9 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('asset-wallet').setDescription('List assets held by the bot wallet.')
+      data: guildOnly(new SlashCommandBuilder().setName('asset-wallet').setDescription('List assets held by the bot wallet.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption((o) => o.setName('filter').setDescription('Asset filter')),
+        .addStringOption((o) => o.setName('filter').setDescription('Asset filter'))),
       async execute(interaction) {
         requireAdmin(interaction, ctx);
         requireAssets(ctx);
@@ -159,7 +175,7 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('history').setDescription('Show recent legacy account activity.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('history').setDescription('Show recent legacy account activity.')),
       async execute(interaction) {
         requireWallet(ctx);
         const rows = await ctx.ledger.history(interaction.user.id, 10);
@@ -168,11 +184,11 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('admin-credit').setDescription('Credit a legacy YERB balance.')
+      data: guildOnly(new SlashCommandBuilder().setName('admin-credit').setDescription('Credit a legacy YERB balance.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addUserOption((o) => o.setName('user').setDescription('User').setRequired(true))
         .addStringOption((o) => o.setName('amount').setDescription('Amount').setRequired(true))
-        .addStringOption((o) => o.setName('reference').setDescription('Unique audit reference').setRequired(true)),
+        .addStringOption((o) => o.setName('reference').setDescription('Unique audit reference').setRequired(true))),
       async execute(interaction) {
         requireAdmin(interaction, ctx);
         const user = interaction.options.getUser('user', true);
@@ -184,12 +200,12 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('admin-asset-credit').setDescription('Credit a user asset balance.')
+      data: guildOnly(new SlashCommandBuilder().setName('admin-asset-credit').setDescription('Credit a user asset balance.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addUserOption((o) => o.setName('user').setDescription('User').setRequired(true))
         .addStringOption((o) => o.setName('asset').setDescription('Asset name').setRequired(true))
         .addStringOption((o) => o.setName('amount').setDescription('Asset amount').setRequired(true))
-        .addStringOption((o) => o.setName('reference').setDescription('Deposit txid or audit reference').setRequired(true)),
+        .addStringOption((o) => o.setName('reference').setDescription('Deposit txid or audit reference').setRequired(true))),
       async execute(interaction) {
         requireAdmin(interaction, ctx);
         requireAssets(ctx);
@@ -203,14 +219,16 @@ export function buildCommands(ctx) {
       }
     },
     {
-      data: new SlashCommandBuilder().setName('help').setDescription('Show available bot commands.'),
+      data: inGuildAndDm(new SlashCommandBuilder().setName('help').setDescription('Show available bot commands.')),
       async execute(interaction) {
         await interaction.reply({ content: [
           '**Yerbas Tip Bot v2 — MySQL drop-in**',
-          '`/deposit`, `/balance`, `/tip`, `/withdraw` — YERB',
-          '`/asset-balance`, `/asset-tip`, `/asset-withdraw` — assets',
-          '`/history` — legacy account log',
-          '`/network`, `/ping`, `/version` — status'
+          '`/deposit`, `/balance`, `/withdraw`, `/history` — available here and in server channels',
+          '`/tip` — server-only public YERB tip',
+          '`/asset-balance`, `/asset-withdraw` — available here and in server channels',
+          '`/asset-tip` — server-only public asset tip',
+          '`/network`, `/ping`, `/version` — status',
+          'Administrator commands are server-only.'
         ].join('\n'), ephemeral: true });
       }
     }
