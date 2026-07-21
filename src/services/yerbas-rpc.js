@@ -43,6 +43,7 @@ export class YerbasRpc {
   getWalletInfo() { return this.call('getwalletinfo'); }
   validateAddress(address) { return this.call('validateaddress', [address]); }
   getNewAddress(label) { return this.call('getnewaddress', [label]); }
+  getRawTransaction(txid, verbose = true) { return this.call('getrawtransaction', [txid, verbose]); }
   listTransactions(label = '*', count = 1000, skip = 0) { return this.call('listtransactions', [label, count, skip, true]); }
   sendToAddress(address, amount, comment = '') { return this.call('sendtoaddress', [address, amount, comment]); }
 
