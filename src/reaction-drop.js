@@ -3,6 +3,7 @@ import { fromUnits, toUnits } from './services/ledger.js';
 
 const RAIN_EMOJI = '🌿';
 const MAX_RAIN_MESSAGE_LENGTH = 200;
+const DEFAULT_ACTIVITY_MINUTES = 30;
 
 function amountString(units) {
   return fromUnits(BigInt(units));
@@ -92,7 +93,7 @@ async function distributeRain({ ledger, creator, participants, amountUnits, refe
   }
 }
 
-export async function startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage) {
+export async function startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage, activityMinutes) {
   const currentBalance = await ctx.ledger.balanceUnits(interaction.user.id, interaction.user.username);
   if (currentBalance < amountUnits) throw new Error('Insufficient balance');
 
@@ -103,6 +104,7 @@ export async function startReactionRain(interaction, ctx, amountUnits, durationS
     `${interaction.user} is making it rain **${fromUnits(amountUnits)} YERB**!`,
     rainMessage ? `> ${rainMessage}` : null,
     `React with ${RAIN_EMOJI} before <t:${endsAt}:R> to participate.`,
+    `Only users who posted in this channel within the last **${activityMinutes} minutes** are eligible.`,
     'The total will be split evenly among eligible participants.'
   ].filter(Boolean).join('\n');
 
@@ -124,19 +126,28 @@ export async function startReactionRain(interaction, ctx, amountUnits, durationS
 
   collector.once('end', async () => {
     try {
+      const eligibleParticipants = [...participants.values()].filter((user) =>
+        ctx.activityTracker.isActive(
+          interaction.guildId,
+          interaction.channelId,
+          user.id,
+          activityMinutes
+        )
+      );
+
       const result = await distributeRain({
         ledger: ctx.ledger,
         creator: interaction.user,
-        participants: [...participants.values()],
+        participants: eligibleParticipants,
         amountUnits,
         reference: `reaction-rain:${interaction.id}`
       });
       if (result.participantCount === 0) {
-        await message.reply('The rain ended with no eligible participants. No YERB was deducted.');
+        await message.reply('The rain ended with no eligible active participants. No YERB was deducted.');
         return;
       }
       await message.reply(
-        `🌧️ Rain complete! **${fromUnits(result.paidUnits)} YERB** was shared among **${result.participantCount}** participants.`
+        `🌧️ Rain complete! **${fromUnits(result.paidUnits)} YERB** was shared among **${result.participantCount} active participants**.`
       );
     } catch (error) {
       console.error(`Reaction rain ${interaction.id} failed:`, error);
@@ -149,7 +160,7 @@ export function buildReactionDropCommand(ctx) {
   return {
     data: new SlashCommandBuilder()
       .setName('rain')
-      .setDescription('Make it rain YERB on users who react in chat.')
+      .setDescription('Make it rain YERB on active users who react in chat.')
       .setContexts(InteractionContextType.Guild)
       .addStringOption((option) => option
         .setName('amount')
@@ -161,6 +172,12 @@ export function buildReactionDropCommand(ctx) {
         .setMinValue(10)
         .setMaxValue(600)
         .setRequired(true))
+      .addIntegerOption((option) => option
+        .setName('activity-minutes')
+        .setDescription('How recently users must have chatted (default: 30)')
+        .setMinValue(1)
+        .setMaxValue(1440)
+        .setRequired(false))
       .addStringOption((option) => option
         .setName('message')
         .setDescription('Optional message shown with your rain')
@@ -173,8 +190,9 @@ export function buildReactionDropCommand(ctx) {
         throw new Error(`Minimum rain is ${ctx.config.minimumTip} YERB`);
       }
       const durationSeconds = interaction.options.getInteger('duration', true);
+      const activityMinutes = interaction.options.getInteger('activity-minutes') ?? DEFAULT_ACTIVITY_MINUTES;
       const customMessage = interaction.options.getString('message');
-      await startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage);
+      await startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage, activityMinutes);
     }
   };
 }
