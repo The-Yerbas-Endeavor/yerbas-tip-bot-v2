@@ -1,0 +1,64 @@
+name: Apply drop start notifications
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-drop-notifications.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/reaction-drops
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Patch drop commands
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          files = [Path('src/reaction-drop.js'), Path('src/asset-rain.js')]
+          for path in files:
+              text = path.read_text()
+
+              old = "  const winnersRequested = interaction.options.getInteger('winners') ?? 1;\n"
+              new = old + "  const notify = interaction.options.getString('notify') ?? 'here';\n  const audience = notify === 'none' ? null : `@${notify}`;\n"
+              if old not in text:
+                  raise SystemExit(f'Missing winners insertion point in {path}')
+              text = text.replace(old, new, 1)
+
+              old = "    content: [\n"
+              new = "    content: [\n      audience,\n"
+              start = text.index('async function startDrop')
+              pos = text.index(old, start)
+              text = text[:pos] + text[pos:].replace(old, new, 1)
+
+              old = "    allowedMentions: { parse: [], users: [interaction.user.id] },\n    fetchReply: true\n"
+              new = "    allowedMentions: { parse: audience ? ['everyone'] : [], users: [interaction.user.id] },\n    fetchReply: true\n"
+              if old not in text:
+                  raise SystemExit(f'Missing allowedMentions insertion point in {path}')
+              text = text.replace(old, new, 1)
+
+              old = "        .addStringOption((o) => o.setName('emoji').setDescription('Unicode or server emoji; default 🌿').setMaxLength(100))\n        .addIntegerOption((o) => o.setName('max-number')"
+              new = "        .addStringOption((o) => o.setName('emoji').setDescription('Unicode or server emoji; default 🌿').setMaxLength(100))\n        .addStringOption((o) => o.setName('notify').setDescription('Who to notify when the drop starts; default @here').addChoices(\n          { name: '@here', value: 'here' },\n          { name: '@everyone', value: 'everyone' },\n          { name: 'No mass mention', value: 'none' }\n        ))\n        .addIntegerOption((o) => o.setName('max-number')"
+              if old not in text:
+                  raise SystemExit(f'Missing command option insertion point in {path}')
+              text = text.replace(old, new, 1)
+
+              path.write_text(text)
+
+          Path('.github/workflows/apply-drop-notifications.yml').unlink()
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/reaction-drop.js src/asset-rain.js .github/workflows/apply-drop-notifications.yml
+          git commit -m "Notify server when drops start"
+          git push origin feature/reaction-drops
