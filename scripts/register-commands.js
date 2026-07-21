@@ -1,4 +1,5 @@
 import { REST, Routes } from 'discord.js';
+import { buildAssetRainCommand } from '../src/asset-rain.js';
 import { buildCommands } from '../src/commands.js';
 import { loadConfig } from '../src/config.js';
 import { buildReactionDropCommand } from '../src/reaction-drop.js';
@@ -6,7 +7,11 @@ import { buildReactionDropCommand } from '../src/reaction-drop.js';
 const config = loadConfig();
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
 const context = { config, ledger: null, rpc: null };
-const commands = [...buildCommands(context), buildReactionDropCommand(context)];
+const commands = [
+  ...buildCommands(context),
+  buildReactionDropCommand(context),
+  buildAssetRainCommand(context)
+];
 
 function normalizeOptionOrder(options = []) {
   return options.map((option) => ({
@@ -22,13 +27,9 @@ const body = commands.map((command) => {
 });
 
 try {
-  // Keep global commands for direct-message support.
   await rest.put(Routes.applicationCommands(config.discordClientId), { body });
   console.log(`Registered ${body.length} global commands with DM contexts.`);
 
-  // Also register the same command set directly in the configured server.
-  // Guild registrations update immediately and avoid waiting for Discord's
-  // global command cache to refresh after adding commands such as /rain.
   if (config.discordGuildId) {
     await rest.put(
       Routes.applicationGuildCommands(config.discordClientId, config.discordGuildId),
