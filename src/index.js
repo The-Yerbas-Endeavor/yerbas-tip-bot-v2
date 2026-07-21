@@ -28,10 +28,14 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  if (config.allowedChannelId && interaction.channelId !== config.allowedChannelId) {
+
+  // BOT_CHANNEL_ID restricts guild usage only. Direct messages remain available
+  // for private account commands such as balance, deposit, history, and withdraw.
+  if (interaction.inGuild() && config.allowedChannelId && interaction.channelId !== config.allowedChannelId) {
     await interaction.reply({ content: 'This bot can only be used in the configured Yerbas bot channel.', ephemeral: true });
     return;
   }
+
   const command = commandMap.get(interaction.commandName);
   if (!command) return interaction.reply({ content: 'Unknown command.', ephemeral: true });
   try {
