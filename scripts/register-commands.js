@@ -2,13 +2,15 @@ import { REST, Routes } from 'discord.js';
 import { buildAssetRainCommand } from '../src/asset-rain.js';
 import { buildCommands } from '../src/commands.js';
 import { loadConfig } from '../src/config.js';
+import { buildHelpCommand } from '../src/help-command.js';
 import { buildReactionDropCommand } from '../src/reaction-drop.js';
 
 const config = loadConfig();
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
 const context = { config, ledger: null, rpc: null };
 const commands = [
-  ...buildCommands(context),
+  ...buildCommands(context).filter((command) => command.data.name !== 'help'),
+  buildHelpCommand(),
   buildReactionDropCommand(context),
   buildAssetRainCommand(context)
 ];
