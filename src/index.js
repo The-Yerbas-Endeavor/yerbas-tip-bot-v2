@@ -1,5 +1,6 @@
 import { ActivityType, Client, Events, GatewayIntentBits } from 'discord.js';
 import { ActivityTracker } from './activity-tracker.js';
+import { buildAssetRainCommand } from './asset-rain.js';
 import { buildCommands } from './commands.js';
 import { loadConfig } from './config.js';
 import { buildReactionDropCommand } from './reaction-drop.js';
@@ -18,7 +19,11 @@ const rpc = new YerbasRpc(config.rpc);
 const walletWorker = new WalletWorker({ config, ledger, rpc });
 const activityTracker = new ActivityTracker();
 const context = { config, ledger, rpc, activityTracker };
-const commands = [...buildCommands(context), buildReactionDropCommand(context)];
+const commands = [
+  ...buildCommands(context),
+  buildReactionDropCommand(context),
+  buildAssetRainCommand(context)
+];
 const commandMap = new Map(commands.map((command) => [command.data.name, command]));
 const client = new Client({
   intents: [
