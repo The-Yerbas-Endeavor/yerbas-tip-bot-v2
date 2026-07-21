@@ -1,10 +1,12 @@
 import { REST, Routes } from 'discord.js';
 import { buildCommands } from '../src/commands.js';
 import { loadConfig } from '../src/config.js';
+import { buildReactionDropCommand } from '../src/reaction-drop.js';
 
 const config = loadConfig();
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
-const commands = buildCommands({ config, ledger: null, rpc: null });
+const context = { config, ledger: null, rpc: null };
+const commands = [...buildCommands(context), buildReactionDropCommand(context)];
 const body = commands.map((command) => command.data.toJSON());
 
 try {
