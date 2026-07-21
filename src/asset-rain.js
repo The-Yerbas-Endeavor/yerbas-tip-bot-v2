@@ -172,6 +172,8 @@ async function runImmediate(interaction, ctx, participants, payout, label, payme
 async function startDrop(interaction, ctx, payout, mode) {
   const duration = interaction.options.getInteger('duration') ?? DEFAULT_DROP_DURATION;
   const winnersRequested = interaction.options.getInteger('winners') ?? 1;
+  const notify = interaction.options.getString('notify') ?? 'here';
+  const audience = notify === 'none' ? null : `@${notify}`;
   const phrase = clean(interaction.options.getString('phrase'), 80);
   const answer = clean(interaction.options.getString('answer'), 80);
   const emojiInput = clean(interaction.options.getString('emoji'), 100) || DEFAULT_EMOJI;
@@ -192,13 +194,14 @@ async function startDrop(interaction, ctx, payout, mode) {
 
   const message = await interaction.reply({
     content: [
+      audience,
       `🌧️ **${payout.assetName} ${mode.toUpperCase()} DROP**`,
       `${interaction.user} is dropping **${fromUnits(payout.amountUnits)} ${payout.assetName}**.`,
       clean(interaction.options.getString('message')) ? `> ${clean(interaction.options.getString('message'))}` : null,
       instruction,
       winnersRequested > 1 ? `Up to **${winnersRequested} winners** will split the total.` : null
     ].filter(Boolean).join('\n'),
-    allowedMentions: { parse: [], users: [interaction.user.id] },
+    allowedMentions: { parse: audience ? ['everyone'] : [], users: [interaction.user.id] },
     fetchReply: true
   });
 
@@ -286,6 +289,11 @@ export function buildAssetRainCommand(ctx) {
         .addStringOption((o) => o.setName('phrase').setDescription('Claim phrase or trivia question').setMaxLength(80))
         .addStringOption((o) => o.setName('answer').setDescription('Correct trivia answer').setMaxLength(80))
         .addStringOption((o) => o.setName('emoji').setDescription('Unicode or server emoji; default 🌿').setMaxLength(100))
+        .addStringOption((o) => o.setName('notify').setDescription('Who to notify when the drop starts; default @here').addChoices(
+          { name: '@here', value: 'here' },
+          { name: '@everyone', value: 'everyone' },
+          { name: 'No mass mention', value: 'none' }
+        ))
         .addIntegerOption((o) => o.setName('max-number').setDescription('Lucky-number upper bound').setMinValue(2).setMaxValue(100000))),
     async execute(interaction) {
       const subcommand = interaction.options.getSubcommand(true);
