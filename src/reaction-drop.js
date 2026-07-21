@@ -1,13 +1,21 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 import { fromUnits, toUnits } from './services/ledger.js';
 
-const DROP_EMOJI = '🌿';
+const RAIN_EMOJI = '🌿';
+const MAX_RAIN_MESSAGE_LENGTH = 200;
 
 function amountString(units) {
   return fromUnits(BigInt(units));
 }
 
-async function distributeDrop({ ledger, creator, participants, amountUnits, reference }) {
+function normalizeRainMessage(value) {
+  if (!value) return null;
+  const message = String(value).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  if (!message) return null;
+  return message.slice(0, MAX_RAIN_MESSAGE_LENGTH);
+}
+
+async function distributeRain({ ledger, creator, participants, amountUnits, reference }) {
   const unique = [...new Map(participants.map((user) => [user.id, user])).values()]
     .filter((user) => !user.bot && user.id !== creator.id);
   if (unique.length === 0) return { participantCount: 0, paidUnits: 0n };
@@ -15,14 +23,14 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
   const count = BigInt(unique.length);
   const baseShare = amountUnits / count;
   const remainder = amountUnits % count;
-  if (baseShare <= 0n) throw new Error('Drop amount is too small for the number of participants');
+  if (baseShare <= 0n) throw new Error('Rain amount is too small for the number of participants');
 
   const connection = await ledger.pool.getConnection();
   try {
     await connection.beginTransaction();
     const [processed] = await connection.execute(
       'INSERT IGNORE INTO v2_processed_events (event_type, event_key) VALUES (?, ?)',
-      ['reaction_drop', reference]
+      ['reaction_rain', reference]
     );
     if (processed.affectedRows !== 1) {
       await connection.rollback();
@@ -39,7 +47,7 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
       [creator.id]
     );
     if (!rows[0] || Number(rows[0].balance) < Number(amountString(amountUnits))) {
-      throw new Error('The drop creator no longer has enough available YERB');
+      throw new Error('The rain creator no longer has enough available YERB');
     }
 
     await connection.execute(
@@ -62,17 +70,17 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
       await connection.execute('UPDATE user SET balance=balance+? WHERE discord_id=?', [share, recipient.id]);
       await connection.execute(
         'INSERT INTO payments (amount, from_discord_id, to_discord_id, type) VALUES (?, ?, ?, ?)',
-        [share, creator.id, recipient.id, 'reactionDrop']
+        [share, creator.id, recipient.id, 'reactionRain']
       );
       await connection.execute(
         'INSERT INTO log (discord_id, description, value) VALUES (?, ?, ?)',
-        [recipient.id, `Received reaction drop from ${creator.id} [${reference}]`, share]
+        [recipient.id, `Received YERB rain from ${creator.id} [${reference}]`, share]
       );
     }
 
     await connection.execute(
       'INSERT INTO log (discord_id, description, value) VALUES (?, ?, ?)',
-      [creator.id, `Created reaction drop for ${unique.length} users [${reference}]`, amountString(amountUnits)]
+      [creator.id, `Created YERB rain for ${unique.length} users [${reference}]`, amountString(amountUnits)]
     );
     await connection.commit();
     return { participantCount: unique.length, paidUnits, shareUnits: baseShare };
@@ -84,24 +92,29 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
   }
 }
 
-export async function startReactionDrop(interaction, ctx, amountUnits, durationSeconds) {
+export async function startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage) {
   const currentBalance = await ctx.ledger.balanceUnits(interaction.user.id, interaction.user.username);
   if (currentBalance < amountUnits) throw new Error('Insufficient balance');
 
   const endsAt = Math.floor(Date.now() / 1000) + durationSeconds;
+  const rainMessage = normalizeRainMessage(customMessage);
+  const content = [
+    '🌧️ **YERB Rain!** 🌿',
+    `${interaction.user} is making it rain **${fromUnits(amountUnits)} YERB**!`,
+    rainMessage ? `> ${rainMessage}` : null,
+    `React with ${RAIN_EMOJI} before <t:${endsAt}:R> to participate.`,
+    'The total will be split evenly among eligible participants.'
+  ].filter(Boolean).join('\n');
+
   const message = await interaction.reply({
-    content: [
-      '🌿 **YERB Reaction Drop!**',
-      `${interaction.user} is dropping **${fromUnits(amountUnits)} YERB**.`,
-      `React with ${DROP_EMOJI} before <t:${endsAt}:R> to participate.`,
-      'The total will be split evenly among eligible participants.'
-    ].join('\n'),
+    content,
+    allowedMentions: { parse: [], users: [interaction.user.id] },
     fetchReply: true
   });
 
-  await message.react(DROP_EMOJI);
+  await message.react(RAIN_EMOJI);
   const collector = message.createReactionCollector({
-    filter: (reaction, user) => reaction.emoji.name === DROP_EMOJI && !user.bot && user.id !== interaction.user.id,
+    filter: (reaction, user) => reaction.emoji.name === RAIN_EMOJI && !user.bot && user.id !== interaction.user.id,
     time: durationSeconds * 1000
   });
 
@@ -111,23 +124,23 @@ export async function startReactionDrop(interaction, ctx, amountUnits, durationS
 
   collector.once('end', async () => {
     try {
-      const result = await distributeDrop({
+      const result = await distributeRain({
         ledger: ctx.ledger,
         creator: interaction.user,
         participants: [...participants.values()],
         amountUnits,
-        reference: `reaction-drop:${interaction.id}`
+        reference: `reaction-rain:${interaction.id}`
       });
       if (result.participantCount === 0) {
-        await message.reply('Reaction drop ended with no eligible participants. No YERB was deducted.');
+        await message.reply('The rain ended with no eligible participants. No YERB was deducted.');
         return;
       }
       await message.reply(
-        `🌿 Drop complete! **${fromUnits(result.paidUnits)} YERB** was shared among **${result.participantCount}** participants.`
+        `🌧️ Rain complete! **${fromUnits(result.paidUnits)} YERB** was shared among **${result.participantCount}** participants.`
       );
     } catch (error) {
-      console.error(`Reaction drop ${interaction.id} failed:`, error);
-      await message.reply(`Reaction drop canceled: ${error.message || 'unexpected payout error'}`);
+      console.error(`Reaction rain ${interaction.id} failed:`, error);
+      await message.reply(`Rain canceled: ${error.message || 'unexpected payout error'}`);
     }
   });
 }
@@ -135,8 +148,8 @@ export async function startReactionDrop(interaction, ctx, amountUnits, durationS
 export function buildReactionDropCommand(ctx) {
   return {
     data: new SlashCommandBuilder()
-      .setName('drop')
-      .setDescription('Start a YERB reaction drop for active chat participants.')
+      .setName('rain')
+      .setDescription('Make it rain YERB on users who react in chat.')
       .setContexts(InteractionContextType.Guild)
       .addStringOption((option) => option
         .setName('amount')
@@ -147,15 +160,21 @@ export function buildReactionDropCommand(ctx) {
         .setDescription('Seconds to accept reactions (10-600)')
         .setMinValue(10)
         .setMaxValue(600)
-        .setRequired(true)),
+        .setRequired(true))
+      .addStringOption((option) => option
+        .setName('message')
+        .setDescription('Optional message shown with your rain')
+        .setMaxLength(MAX_RAIN_MESSAGE_LENGTH)
+        .setRequired(false)),
     async execute(interaction) {
       if (!ctx.config.walletEnabled) throw new Error('Wallet features are disabled by WALLET_ENABLED=false');
       const amountUnits = toUnits(interaction.options.getString('amount', true));
       if (amountUnits < toUnits(ctx.config.minimumTip)) {
-        throw new Error(`Minimum drop is ${ctx.config.minimumTip} YERB`);
+        throw new Error(`Minimum rain is ${ctx.config.minimumTip} YERB`);
       }
       const durationSeconds = interaction.options.getInteger('duration', true);
-      await startReactionDrop(interaction, ctx, amountUnits, durationSeconds);
+      const customMessage = interaction.options.getString('message');
+      await startReactionRain(interaction, ctx, amountUnits, durationSeconds, customMessage);
     }
   };
 }
