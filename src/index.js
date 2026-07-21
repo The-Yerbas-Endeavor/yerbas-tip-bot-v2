@@ -3,6 +3,7 @@ import { ActivityTracker } from './activity-tracker.js';
 import { buildAssetRainCommand } from './asset-rain.js';
 import { buildCommands } from './commands.js';
 import { loadConfig } from './config.js';
+import { buildHelpCommand } from './help-command.js';
 import { buildReactionDropCommand } from './reaction-drop.js';
 import './services/mysql-ledger-admin.js';
 import { MySqlLedger } from './services/mysql-ledger.js';
@@ -20,7 +21,8 @@ const walletWorker = new WalletWorker({ config, ledger, rpc });
 const activityTracker = new ActivityTracker();
 const context = { config, ledger, rpc, activityTracker };
 const commands = [
-  ...buildCommands(context),
+  ...buildCommands(context).filter((command) => command.data.name !== 'help'),
+  buildHelpCommand(),
   buildReactionDropCommand(context),
   buildAssetRainCommand(context)
 ];
