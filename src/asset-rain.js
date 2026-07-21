@@ -1,5 +1,6 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 import { fromUnits, toUnits } from './services/ledger.js';
+import { resolveReactionEmoji } from './utils/reaction-emoji.js';
 
 const DEFAULT_EMOJI = '🌿';
 const DEFAULT_ACTIVITY_MINUTES = 30;
@@ -173,7 +174,10 @@ async function startDrop(interaction, ctx, payout, mode) {
   const winnersRequested = interaction.options.getInteger('winners') ?? 1;
   const phrase = clean(interaction.options.getString('phrase'), 80);
   const answer = clean(interaction.options.getString('answer'), 80);
-  const emoji = clean(interaction.options.getString('emoji'), 16) || DEFAULT_EMOJI;
+  const emojiInput = clean(interaction.options.getString('emoji'), 100) || DEFAULT_EMOJI;
+  const reactionEmoji = (mode === 'reaction' || mode === 'lottery')
+    ? await resolveReactionEmoji(interaction, emojiInput, DEFAULT_EMOJI)
+    : null;
   const maxNumber = interaction.options.getInteger('max-number') ?? 100;
   const targetNumber = mode === 'lucky' ? Math.floor(Math.random() * maxNumber) + 1 : null;
   if (mode === 'phrase' && !phrase) throw new Error('Phrase mode requires the phrase option');
@@ -181,7 +185,7 @@ async function startDrop(interaction, ctx, payout, mode) {
 
   const endsAt = Math.floor(Date.now() / 1000) + duration;
   let instruction;
-  if (mode === 'reaction' || mode === 'lottery') instruction = `React with ${emoji} before <t:${endsAt}:R>.`;
+  if (mode === 'reaction' || mode === 'lottery') instruction = `React with ${reactionEmoji.display} before <t:${endsAt}:R>.`;
   else if (mode === 'phrase') instruction = `Type **${phrase}** before <t:${endsAt}:R>.`;
   else if (mode === 'trivia') instruction = `Answer before <t:${endsAt}:R>. Question: **${phrase}**`;
   else instruction = `Guess a number from **1-${maxNumber}** before <t:${endsAt}:R>. Closest guess wins.`;
@@ -201,9 +205,9 @@ async function startDrop(interaction, ctx, payout, mode) {
   const entrants = new Map();
   let collector;
   if (mode === 'reaction' || mode === 'lottery') {
-    await message.react(emoji);
+    await message.react(reactionEmoji.reaction);
     collector = message.createReactionCollector({
-      filter: (reaction, user) => reaction.emoji.name === emoji && !user.bot && user.id !== interaction.user.id,
+      filter: (reaction, user) => reactionEmoji.matches(reaction) && !user.bot && user.id !== interaction.user.id,
       time: duration * 1000
     });
     collector.on('collect', (_reaction, user) => entrants.set(user.id, { user }));
@@ -281,7 +285,7 @@ export function buildAssetRainCommand(ctx) {
         .addIntegerOption((o) => o.setName('winners').setDescription('Number of winners').setMinValue(1).setMaxValue(25))
         .addStringOption((o) => o.setName('phrase').setDescription('Claim phrase or trivia question').setMaxLength(80))
         .addStringOption((o) => o.setName('answer').setDescription('Correct trivia answer').setMaxLength(80))
-        .addStringOption((o) => o.setName('emoji').setDescription('Reaction emoji; default 🌿').setMaxLength(16))
+        .addStringOption((o) => o.setName('emoji').setDescription('Unicode or server emoji; default 🌿').setMaxLength(100))
         .addIntegerOption((o) => o.setName('max-number').setDescription('Lucky-number upper bound').setMinValue(2).setMaxValue(100000))),
     async execute(interaction) {
       const subcommand = interaction.options.getSubcommand(true);
