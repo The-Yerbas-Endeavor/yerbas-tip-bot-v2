@@ -1,14 +1,17 @@
 import { toUnits, fromUnits } from './ledger.js';
 
-function transactionAssetName(tx) {
-  const value = tx.asset_name ?? tx.assetName ?? tx.asset;
-  return value ? String(value).trim() : null;
+function outputAddress(output) {
+  const script = output?.scriptPubKey ?? {};
+  if (typeof script.address === 'string' && script.address) return script.address;
+  if (Array.isArray(script.addresses) && script.addresses.length) return script.addresses[0];
+  return null;
 }
 
-function transactionAmount(tx, isAsset) {
-  const value = isAsset ? (tx.asset_amount ?? tx.assetAmount ?? tx.amount) : tx.amount;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+function assetOutpoints(assetData) {
+  if (!assetData || typeof assetData !== 'object') return [];
+  if (Array.isArray(assetData.outpoints)) return assetData.outpoints;
+  if (Array.isArray(assetData.outputs)) return assetData.outputs;
+  return [];
 }
 
 export class WalletWorker {
@@ -37,7 +40,8 @@ export class WalletWorker {
     if (this.running) return;
     this.running = true;
     try {
-      await this.reconcileDeposits();
+      await this.reconcileYerbDeposits();
+      if (this.config.assetsEnabled) await this.reconcileAssetDeposits();
       if (this.config.withdrawalsEnabled) await this.processOneWithdrawal();
       if (this.config.assetsEnabled && this.config.assetWithdrawalsEnabled) await this.processOneAssetWithdrawal();
     } finally {
@@ -45,46 +49,51 @@ export class WalletWorker {
     }
   }
 
-  async reconcileDeposits() {
+  async reconcileYerbDeposits() {
     const transactions = await this.rpc.listTransactions('*', 1000, 0);
     for (const tx of transactions) {
       if (tx.category !== 'receive') continue;
       if ((tx.confirmations ?? 0) < this.config.confirmations) continue;
-      if (!tx.address || !tx.txid) continue;
-
+      if (!tx.address || !tx.txid || Number(tx.amount) <= 0) continue;
       const user = await this.ledger.getUserByAddress(tx.address);
       if (!user) continue;
+      const amount = toUnits(Number(tx.amount).toFixed(8));
+      const result = await this.ledger.creditDeposit(user.discord_id, amount, tx.txid, tx.vout ?? 0);
+      if (result.changes === 1n) console.log(`Credited ${fromUnits(amount)} YERB to ${user.discord_id}: ${tx.txid}`);
+    }
+  }
 
-      const assetName = transactionAssetName(tx);
-      const amountValue = transactionAmount(tx, Boolean(assetName));
-      if (amountValue === null) continue;
-      const amount = toUnits(amountValue.toFixed(8));
-      const vout = tx.vout ?? 0;
+  async reconcileAssetDeposits() {
+    const assets = await this.rpc.listMyAssets('*', true, 500, 0);
+    for (const [assetName, assetData] of Object.entries(assets || {})) {
+      for (const outpoint of assetOutpoints(assetData)) {
+        const txid = outpoint.txid ?? outpoint.tx_hash;
+        const vout = Number(outpoint.vout ?? outpoint.n ?? 0);
+        const amountValue = Number(outpoint.amount ?? outpoint.qty ?? outpoint.value);
+        if (!txid || !Number.isInteger(vout) || vout < 0 || !Number.isFinite(amountValue) || amountValue <= 0) continue;
 
-      if (assetName) {
-        if (!this.config.assetsEnabled) continue;
-        const reference = `${tx.txid}:${vout}`;
+        const tx = await this.rpc.getRawTransaction(txid, true);
+        if ((tx?.confirmations ?? 0) < this.config.confirmations) continue;
+        const output = Array.isArray(tx?.vout) ? tx.vout.find((item) => Number(item.n) === vout) : null;
+        const address = outputAddress(output);
+        if (!address) continue;
+        const user = await this.ledger.getUserByAddress(address);
+        if (!user) continue;
+
+        const amount = toUnits(amountValue.toFixed(8));
+        const reference = `${txid}:${vout}`;
         const result = await this.ledger.addAssetCredit(
           user.discord_id,
           assetName,
           amount,
           'asset_deposit',
           reference,
-          {
-            txid: tx.txid,
-            vout,
-            address: tx.address,
-            confirmations: tx.confirmations ?? 0
-          }
+          { txid, vout, address, confirmations: tx.confirmations ?? 0 }
         );
         if (result.changes === 1n) {
           console.log(`Credited ${fromUnits(amount)} ${assetName} to ${user.discord_id}: ${reference}`);
         }
-        continue;
       }
-
-      const result = await this.ledger.creditDeposit(user.discord_id, amount, tx.txid, vout);
-      if (result.changes === 1n) console.log(`Credited ${fromUnits(amount)} YERB to ${user.discord_id}: ${tx.txid}`);
     }
   }
 
