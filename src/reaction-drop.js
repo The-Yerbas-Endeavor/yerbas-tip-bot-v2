@@ -1,4 +1,5 @@
-import { fromUnits } from './services/ledger.js';
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
+import { fromUnits, toUnits } from './services/ledger.js';
 
 const DROP_EMOJI = '🌿';
 
@@ -19,7 +20,6 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
   const connection = await ledger.pool.getConnection();
   try {
     await connection.beginTransaction();
-
     const [processed] = await connection.execute(
       'INSERT IGNORE INTO v2_processed_events (event_type, event_key) VALUES (?, ?)',
       ['reaction_drop', reference]
@@ -34,7 +34,6 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
        ON DUPLICATE KEY UPDATE username=VALUES(username)`,
       [String(creator.username).slice(0, 60), creator.id]
     );
-
     const [rows] = await connection.execute(
       'SELECT balance FROM user WHERE discord_id=? FOR UPDATE',
       [creator.id]
@@ -60,10 +59,7 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
          ON DUPLICATE KEY UPDATE username=VALUES(username)`,
         [String(recipient.username).slice(0, 60), recipient.id]
       );
-      await connection.execute(
-        'UPDATE user SET balance=balance+? WHERE discord_id=?',
-        [share, recipient.id]
-      );
+      await connection.execute('UPDATE user SET balance=balance+? WHERE discord_id=?', [share, recipient.id]);
       await connection.execute(
         'INSERT INTO payments (amount, from_discord_id, to_discord_id, type) VALUES (?, ?, ?, ?)',
         [share, creator.id, recipient.id, 'reactionDrop']
@@ -78,7 +74,6 @@ async function distributeDrop({ ledger, creator, participants, amountUnits, refe
       'INSERT INTO log (discord_id, description, value) VALUES (?, ?, ?)',
       [creator.id, `Created reaction drop for ${unique.length} users [${reference}]`, amountString(amountUnits)]
     );
-
     await connection.commit();
     return { participantCount: unique.length, paidUnits, shareUnits: baseShare };
   } catch (error) {
@@ -96,7 +91,7 @@ export async function startReactionDrop(interaction, ctx, amountUnits, durationS
   const endsAt = Math.floor(Date.now() / 1000) + durationSeconds;
   const message = await interaction.reply({
     content: [
-      `🌿 **YERB Reaction Drop!**`,
+      '🌿 **YERB Reaction Drop!**',
       `${interaction.user} is dropping **${fromUnits(amountUnits)} YERB**.`,
       `React with ${DROP_EMOJI} before <t:${endsAt}:R> to participate.`,
       'The total will be split evenly among eligible participants.'
@@ -123,12 +118,10 @@ export async function startReactionDrop(interaction, ctx, amountUnits, durationS
         amountUnits,
         reference: `reaction-drop:${interaction.id}`
       });
-
       if (result.participantCount === 0) {
         await message.reply('Reaction drop ended with no eligible participants. No YERB was deducted.');
         return;
       }
-
       await message.reply(
         `🌿 Drop complete! **${fromUnits(result.paidUnits)} YERB** was shared among **${result.participantCount}** participants.`
       );
@@ -137,4 +130,32 @@ export async function startReactionDrop(interaction, ctx, amountUnits, durationS
       await message.reply(`Reaction drop canceled: ${error.message || 'unexpected payout error'}`);
     }
   });
+}
+
+export function buildReactionDropCommand(ctx) {
+  return {
+    data: new SlashCommandBuilder()
+      .setName('drop')
+      .setDescription('Start a YERB reaction drop for active chat participants.')
+      .setContexts(InteractionContextType.Guild)
+      .addStringOption((option) => option
+        .setName('amount')
+        .setDescription('Total YERB to split among participants')
+        .setRequired(true))
+      .addIntegerOption((option) => option
+        .setName('duration')
+        .setDescription('Seconds to accept reactions (10-600)')
+        .setMinValue(10)
+        .setMaxValue(600)
+        .setRequired(true)),
+    async execute(interaction) {
+      if (!ctx.config.walletEnabled) throw new Error('Wallet features are disabled by WALLET_ENABLED=false');
+      const amountUnits = toUnits(interaction.options.getString('amount', true));
+      if (amountUnits < toUnits(ctx.config.minimumTip)) {
+        throw new Error(`Minimum drop is ${ctx.config.minimumTip} YERB`);
+      }
+      const durationSeconds = interaction.options.getInteger('duration', true);
+      await startReactionDrop(interaction, ctx, amountUnits, durationSeconds);
+    }
+  };
 }
