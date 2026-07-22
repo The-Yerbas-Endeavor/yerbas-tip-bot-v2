@@ -1,6 +1,8 @@
+const MIN_ACTIVE_MESSAGES = 2;
+
 export class ActivityTracker {
   constructor() {
-    this.lastMessageAt = new Map();
+    this.messageTimes = new Map();
     this.users = new Map();
   }
 
@@ -11,24 +13,39 @@ export class ActivityTracker {
   record(message) {
     if (!message.inGuild() || message.author.bot) return;
     const key = this.key(message.guildId, message.channelId, message.author.id);
-    this.lastMessageAt.set(key, Date.now());
+    const times = this.messageTimes.get(key) || [];
+    times.push(Date.now());
+    this.messageTimes.set(key, times);
     this.users.set(key, message.author);
   }
 
+  recentMessageCount(guildId, channelId, userId, withinMinutes, now = Date.now()) {
+    const key = this.key(guildId, channelId, userId);
+    const cutoff = now - withinMinutes * 60_000;
+    const recent = (this.messageTimes.get(key) || []).filter((timestamp) => timestamp >= cutoff);
+
+    if (recent.length) this.messageTimes.set(key, recent);
+    else this.messageTimes.delete(key);
+
+    return recent.length;
+  }
+
   isActive(guildId, channelId, userId, withinMinutes, now = Date.now()) {
-    const timestamp = this.lastMessageAt.get(this.key(guildId, channelId, userId));
-    if (!timestamp) return false;
-    return now - timestamp <= withinMinutes * 60_000;
+    return this.recentMessageCount(guildId, channelId, userId, withinMinutes, now) >= MIN_ACTIVE_MESSAGES;
   }
 
   activeUsers(guildId, channelId, withinMinutes, now = Date.now()) {
     const prefix = `${guildId}:${channelId}:`;
     const users = [];
-    for (const [key, timestamp] of this.lastMessageAt.entries()) {
-      if (!key.startsWith(prefix) || now - timestamp > withinMinutes * 60_000) continue;
+
+    for (const key of [...this.messageTimes.keys()]) {
+      if (!key.startsWith(prefix)) continue;
+      const userId = key.slice(prefix.length);
+      if (this.recentMessageCount(guildId, channelId, userId, withinMinutes, now) < MIN_ACTIVE_MESSAGES) continue;
       const user = this.users.get(key);
       if (user && !user.bot) users.push(user);
     }
+
     return users;
   }
 }
