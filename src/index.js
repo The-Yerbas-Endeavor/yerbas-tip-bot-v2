@@ -1,52 +1,67 @@
-import {
-  ActivityType,
-  Client,
-  Events,
-  GatewayIntentBits
-} from 'discord.js';
+import { ActivityType, Client, Events, GatewayIntentBits } from 'discord.js';
+import { ActivityTracker } from './activity-tracker.js';
+import { buildAssetRainCommand } from './asset-rain.js';
 import { buildCommands } from './commands.js';
 import { loadConfig } from './config.js';
-import { Ledger } from './services/ledger.js';
-import { AssetLedger } from './services/asset-ledger.js';
+import { buildHelpCommand } from './help-command.js';
+import { buildReactionDropCommand } from './reaction-drop.js';
+import './services/mysql-ledger-admin.js';
+import { MySqlLedger } from './services/mysql-ledger.js';
 import { YerbasRpc } from './services/yerbas-rpc.js';
 import { WalletWorker } from './services/wallet-worker.js';
 
 const config = loadConfig();
-const ledger = new Ledger(config.databasePath);
-const assetLedger = new AssetLedger(config.databasePath);
+const ledger = new MySqlLedger(config.mysql);
+await ledger.migrate();
+const dbInfo = await ledger.healthCheck();
+console.log(`Connected to MySQL database ${dbInfo.db}`);
+
 const rpc = new YerbasRpc(config.rpc);
-const walletWorker = new WalletWorker({ config, ledger, assetLedger, rpc });
-const commands = buildCommands({ config, ledger, assetLedger, rpc });
+const walletWorker = new WalletWorker({ config, ledger, rpc });
+const activityTracker = new ActivityTracker();
+const context = { config, ledger, rpc, activityTracker };
+const commands = [
+  ...buildCommands(context).filter((command) => command.data.name !== 'help'),
+  buildHelpCommand(),
+  buildReactionDropCommand(context),
+  buildAssetRainCommand(context)
+];
 const commandMap = new Map(commands.map((command) => [command.data.name, command]));
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.MessageContent
+  ]
+});
 
 client.once(Events.ClientReady, (readyClient) => {
-  readyClient.user.setPresence({
-    activities: [{ name: config.botStatus, type: ActivityType.Watching }],
-    status: 'online'
-  });
+  readyClient.user.setPresence({ activities: [{ name: config.botStatus, type: ActivityType.Watching }], status: 'online' });
   walletWorker.start();
   console.log(`Yerbas Tip Bot v2 connected as ${readyClient.user.tag}`);
-  console.log(`Wallet features: ${config.walletEnabled ? 'enabled' : 'disabled'}`);
-  console.log(`Withdrawals: ${config.withdrawalsEnabled ? 'enabled' : 'disabled'}`);
-  console.log(`Assets: ${config.assetsEnabled ? 'enabled' : 'disabled'}`);
-  console.log(`Asset withdrawals: ${config.assetWithdrawalsEnabled ? 'enabled' : 'disabled'}`);
+  console.log(`Wallet: ${config.walletEnabled ? 'enabled' : 'disabled'}; withdrawals: ${config.withdrawalsEnabled ? 'enabled' : 'disabled'}`);
+  console.log(`Assets: ${config.assetsEnabled ? 'enabled' : 'disabled'}; asset withdrawals: ${config.assetWithdrawalsEnabled ? 'enabled' : 'disabled'}`);
+});
+
+client.on(Events.MessageCreate, (message) => {
+  activityTracker.record(message);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  if (config.allowedChannelId && interaction.channelId !== config.allowedChannelId) {
+  // BOT_CHANNEL_ID restricts guild usage only. Direct messages remain available
+  // for private account commands such as balance, deposit, history, and withdraw.
+  if (interaction.inGuild() && config.allowedChannelId && interaction.channelId !== config.allowedChannelId) {
     await interaction.reply({ content: 'This bot can only be used in the configured Yerbas bot channel.', ephemeral: true });
     return;
   }
 
   const command = commandMap.get(interaction.commandName);
-  if (!command) {
-    await interaction.reply({ content: 'Unknown command.', ephemeral: true });
-    return;
-  }
-
+  if (!command) return interaction.reply({ content: 'Unknown command.', ephemeral: true });
   try {
     await command.execute(interaction);
   } catch (error) {
@@ -61,18 +76,15 @@ async function shutdown(signal) {
   console.log(`Received ${signal}; shutting down.`);
   walletWorker.stop();
   client.destroy();
-  assetLedger.close();
-  ledger.close();
+  await ledger.close();
   process.exit(0);
 }
 
-process.once('SIGINT', () => shutdown('SIGINT'));
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-
-client.login(config.discordToken).catch((error) => {
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+client.login(config.discordToken).catch(async (error) => {
   console.error('Discord login failed:', error);
   walletWorker.stop();
-  assetLedger.close();
-  ledger.close();
+  await ledger.close();
   process.exit(1);
 });
