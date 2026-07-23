@@ -4,7 +4,7 @@ import { resolveReactionEmoji } from './utils/reaction-emoji.js';
 
 const DEFAULT_EMOJI = '🌿';
 const DEFAULT_ACTIVITY_MINUTES = 30;
-const DEFAULT_DROP_DURATION = 60;
+const DEFAULT_DROP_DURATION = 21600;
 const MAX_PUBLIC_MENTIONS = 25;
 
 function clean(value, max = 200) {
