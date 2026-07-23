@@ -311,7 +311,7 @@ export function buildReactionDropCommand(ctx) {
           { name: 'Trivia', value: 'trivia' },
           { name: 'Lucky number', value: 'lucky' }
         ))
-        .addIntegerOption((o) => o.setName('duration').setDescription('Entry time in seconds').setMinValue(10).setMaxValue(600))
+        .addIntegerOption((o) => o.setName('duration').setDescription('Entry time in seconds').setMinValue(10).setMaxValue(21600))
         .addIntegerOption((o) => o.setName('winners').setDescription('Number of winners').setMinValue(1).setMaxValue(25))
         .addStringOption((o) => o.setName('phrase').setDescription('Claim phrase or trivia question').setMaxLength(80))
         .addStringOption((o) => o.setName('answer').setDescription('Correct trivia answer').setMaxLength(80))
